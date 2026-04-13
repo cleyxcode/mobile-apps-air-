@@ -10,6 +10,7 @@ import '../repositories/sensor_repository.dart';
 class HttpSensorDatasource implements SensorRepository {
   static const String _baseUrl = AppConfig.apiBaseUrl;
   static const Duration _timeout = Duration(seconds: 10);
+  static const Duration _controlTimeout = Duration(seconds: 5);
 
   @override
   Future<SensorData> getStatus() async {
@@ -46,7 +47,7 @@ class HttpSensorDatasource implements SensorRepository {
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'action': on ? 'on' : 'off', 'mode': mode}),
         )
-        .timeout(_timeout);
+        .timeout(_controlTimeout);
     return response.statusCode == 200;
   }
 

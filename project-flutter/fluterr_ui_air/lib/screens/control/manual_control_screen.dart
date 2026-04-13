@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../constants/app_colors.dart';
+import '../../core/service_locator.dart';
 import '../../widgets/bottom_navigation.dart';
 
 class ManualControlScreen extends StatefulWidget {
@@ -10,9 +13,80 @@ class ManualControlScreen extends StatefulWidget {
 }
 
 class _ManualControlScreenState extends State<ManualControlScreen> {
-  bool isPumpOn = true;
-  int selectedDuration = 2; // in minutes
+  bool _pumpOn = false;
+  bool _loading = false;
+  bool _initialLoading = true;
+  String _statusMsg = '';
+  bool _isError = false;
+  int selectedDuration = 2;
   bool autoThresholdEnabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPumpStatus();
+  }
+
+  Future<void> _loadPumpStatus() async {
+    try {
+      final data = await ServiceLocator.sensorRepo.getStatus();
+      if (mounted) {
+        setState(() {
+          _pumpOn = data.pumpStatus;
+          _initialLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _initialLoading = false);
+    }
+  }
+
+  Future<void> _controlPump({required bool turnOn}) async {
+    if (_loading) return;
+    HapticFeedback.mediumImpact();
+
+    final prev = _pumpOn;
+    setState(() {
+      _pumpOn = turnOn;
+      _loading = true;
+      _isError = false;
+      _statusMsg = turnOn ? 'Menyalakan pompa...' : 'Mematikan pompa...';
+    });
+
+    try {
+      final success = await ServiceLocator.sensorRepo
+          .controlPump(on: turnOn, mode: 'manual');
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          if (success) {
+            _statusMsg = turnOn ? '✓ Pompa dinyalakan' : '✓ Pompa dimatikan';
+            _isError = false;
+          } else {
+            _pumpOn = prev;
+            _statusMsg = 'Gagal mengontrol pompa. Coba lagi.';
+            _isError = true;
+          }
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _pumpOn = prev;
+          _statusMsg = 'Gagal terhubung ke server.';
+          _isError = true;
+        });
+      }
+    }
+    _autoDismissStatus();
+  }
+
+  void _autoDismissStatus() {
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _statusMsg = '');
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -36,34 +110,6 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
                 child: SingleChildScrollView(
                   child: Column(
                     children: [
-                      // Warning Banner
-                      Container(
-                        color: const Color(0xFFFEF9C3),
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 12,
-                              height: 11,
-                              child: Image.network(
-                                "https://storage.googleapis.com/tagjs-prod.appspot.com/v1/jKLzvv3N3H/4gx7k3py_expires_30_days.png",
-                                fit: BoxFit.fill,
-                              ),
-                            ),
-                            const SizedBox(width: 9),
-                            const Expanded(
-                              child: Text(
-                                "TANAH TERLALU BASAH. Penyiraman tidak disarankan. Kelembaban\nsaat ini 75%",
-                                style: TextStyle(
-                                  color: Color(0xFF854D0E),
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
                       // Mode Status
                       Container(
                         color: const Color(0xFFF1F5F9),
@@ -86,9 +132,7 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
                               ],
                             ),
                             InkWell(
-                              onTap: () {
-                                Navigator.pop(context);
-                              },
+                              onTap: () => Navigator.pop(context),
                               child: Container(
                                 decoration: BoxDecoration(
                                   border: Border.all(
@@ -125,72 +169,87 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
                       // Pump Status
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 32),
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: const BoxDecoration(
-                            image: DecorationImage(
-                              image: NetworkImage(
-                                "https://storage.googleapis.com/tagjs-prod.appspot.com/v1/jKLzvv3N3H/es2oce1k_expires_30_days.png",
+                        child: _initialLoading
+                            ? const CircularProgressIndicator()
+                            : AnimatedContainer(
+                                duration: const Duration(milliseconds: 300),
+                                padding: const EdgeInsets.all(16),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(9999),
+                                    color: AppColors.white,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: (_pumpOn
+                                                ? AppColors.primary
+                                                : Colors.grey)
+                                            .withValues(alpha: 0.15),
+                                        blurRadius: 20,
+                                        offset: const Offset(0, 8),
+                                      ),
+                                    ],
+                                    border: Border.all(
+                                      color: _pumpOn
+                                          ? AppColors.primary.withValues(
+                                              alpha: 0.3)
+                                          : const Color(0xFFE2E8F0),
+                                      width: 2,
+                                    ),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 40,
+                                    vertical: 30,
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      const Text(
+                                        "STATUS POMPA",
+                                        style: TextStyle(
+                                          color: AppColors.textLight,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 7),
+                                      AnimatedDefaultTextStyle(
+                                        duration:
+                                            const Duration(milliseconds: 300),
+                                        style: TextStyle(
+                                          color: _pumpOn
+                                              ? const Color(0xFF19E66F)
+                                              : AppColors.error,
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        child: Text(
+                                            _pumpOn ? "MENYALA" : "MATI"),
+                                      ),
+                                      const SizedBox(height: 7),
+                                      AnimatedContainer(
+                                        duration:
+                                            const Duration(milliseconds: 300),
+                                        width: 16,
+                                        height: 16,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: _pumpOn
+                                              ? const Color(0xFF19E66F)
+                                              : AppColors.error,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: (_pumpOn
+                                                      ? const Color(0xFF19E66F)
+                                                      : AppColors.error)
+                                                  .withValues(alpha: 0.5),
+                                              blurRadius: 8,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
-                              fit: BoxFit.fill,
-                            ),
-                          ),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(9999),
-                              color: AppColors.white,
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: AppColors.shadow,
-                                  blurRadius: 12,
-                                  offset: Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 29,
-                              vertical: 30,
-                            ),
-                            child: Column(
-                              children: [
-                                const Text(
-                                  "STATUS POMPA",
-                                  style: TextStyle(
-                                    color: AppColors.textLight,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 7),
-                                const Text(
-                                  "MENYALA",
-                                  style: TextStyle(
-                                    color: Color(0xFF19E66F),
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 7),
-                                SizedBox(
-                                  width: 20,
-                                  height: 24,
-                                  child: Image.network(
-                                    "https://storage.googleapis.com/tagjs-prod.appspot.com/v1/jKLzvv3N3H/bdj5ozxu_expires_30_days.png",
-                                    fit: BoxFit.fill,
-                                  ),
-                                ),
-                                const SizedBox(height: 7),
-                                const Text(
-                                  "2m 34s",
-                                  style: TextStyle(
-                                    color: AppColors.textMedium,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
                       ),
 
                       // Control Panel
@@ -252,25 +311,24 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
                                   ),
                                   const SizedBox(width: 25),
                                   GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        isPumpOn = !isPumpOn;
-                                      });
-                                    },
-                                    child: Container(
+                                    onTap: _loading
+                                        ? null
+                                        : () => _controlPump(on: !_pumpOn),
+                                    child: AnimatedContainer(
+                                      duration:
+                                          const Duration(milliseconds: 200),
                                       width: 56,
                                       height: 32,
                                       decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(
-                                          9999,
-                                        ),
-                                        color: isPumpOn
+                                        borderRadius:
+                                            BorderRadius.circular(9999),
+                                        color: _pumpOn
                                             ? const Color(0xFF19E66F)
                                             : const Color(0xFFE2E8F0),
                                       ),
                                       padding: EdgeInsets.only(
-                                        left: isPumpOn ? 28 : 4,
-                                        right: isPumpOn ? 4 : 28,
+                                        left: _pumpOn ? 28 : 4,
+                                        right: _pumpOn ? 4 : 28,
                                       ),
                                       child: Container(
                                         width: 24,
@@ -318,7 +376,7 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
                               ),
                               const SizedBox(height: 16),
 
-                              // Duration Slider
+                              // Duration Slider placeholder
                               Container(
                                 height: 8,
                                 decoration: BoxDecoration(
@@ -344,7 +402,7 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
                               ),
                               const SizedBox(height: 24),
 
-                              // Auto Threshold
+                              // Auto Threshold toggle (UI only)
                               Container(
                                 decoration: BoxDecoration(
                                   border: Border.all(
@@ -375,7 +433,9 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
                                                   !autoThresholdEnabled;
                                             });
                                           },
-                                          child: Container(
+                                          child: AnimatedContainer(
+                                            duration: const Duration(
+                                                milliseconds: 200),
                                             width: 40,
                                             height: 24,
                                             decoration: BoxDecoration(
@@ -425,24 +485,19 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
                                           ),
                                         ),
                                         const SizedBox(width: 13),
-                                        InkWell(
-                                          onTap: () {
-                                            debugPrint('Edit threshold');
-                                          },
-                                          child: Container(
-                                            decoration: BoxDecoration(
-                                              borderRadius:
-                                                  BorderRadius.circular(16),
-                                              color: const Color(0xFFF1F5F9),
-                                            ),
-                                            padding: const EdgeInsets.all(12),
-                                            child: const Text(
-                                              "40%",
-                                              style: TextStyle(
-                                                color: Color(0xFF334155),
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.bold,
-                                              ),
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius:
+                                                BorderRadius.circular(16),
+                                            color: const Color(0xFFF1F5F9),
+                                          ),
+                                          padding: const EdgeInsets.all(12),
+                                          child: const Text(
+                                            "40%",
+                                            style: TextStyle(
+                                              color: Color(0xFF334155),
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold,
                                             ),
                                           ),
                                         ),
@@ -457,170 +512,182 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
                       ),
                       const SizedBox(height: 16),
 
+                      // Status Message
+                      if (_statusMsg.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: _isError
+                                  ? AppColors.error.withValues(alpha: 0.08)
+                                  : const Color(0xFF19E66F)
+                                      .withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: _isError
+                                    ? AppColors.error.withValues(alpha: 0.2)
+                                    : const Color(0xFF19E66F)
+                                        .withValues(alpha: 0.2),
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _isError
+                                      ? Icons.error_outline_rounded
+                                      : Icons.check_circle_outline_rounded,
+                                  color: _isError
+                                      ? AppColors.error
+                                      : const Color(0xFF19E66F),
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _statusMsg,
+                                    style: TextStyle(
+                                      color: _isError
+                                          ? AppColors.error
+                                          : const Color(0xFF19E66F),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+
                       // Action Buttons
                       Container(
                         color: const Color(0xCCFFFFFF),
-                        padding: const EdgeInsets.only(top: 13),
+                        padding: const EdgeInsets.only(top: 4),
                         child: Column(
                           children: [
-                            // Stop Button
+                            // Stop / Hentikan Button
                             Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                              ),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
                               child: InkWell(
-                                onTap: () {
-                                  debugPrint('Stop watering');
-                                },
-                                child: Container(
+                                onTap: _loading
+                                    ? null
+                                    : () => _controlPump(on: false),
+                                borderRadius: BorderRadius.circular(24),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(24),
-                                    color: const Color(0xFFEF4444),
-                                    boxShadow: const [
+                                    color: _pumpOn
+                                        ? const Color(0xFFEF4444)
+                                        : const Color(0xFFEF4444)
+                                            .withValues(alpha: 0.5),
+                                    boxShadow: [
                                       BoxShadow(
-                                        color: AppColors.shadow,
+                                        color: const Color(0xFFEF4444)
+                                            .withValues(alpha: 0.3),
                                         blurRadius: 12,
-                                        offset: Offset(0, 4),
+                                        offset: const Offset(0, 4),
                                       ),
                                     ],
                                   ),
                                   padding: const EdgeInsets.symmetric(
-                                    vertical: 17,
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      SizedBox(
-                                        width: 14,
-                                        height: 14,
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            24,
+                                      vertical: 17),
+                                  child: _loading
+                                      ? const Center(
+                                          child: SizedBox(
+                                            width: 22,
+                                            height: 22,
+                                            child: CircularProgressIndicator(
+                                              color: Colors.white,
+                                              strokeWidth: 2.5,
+                                            ),
                                           ),
-                                          child: Image.network(
-                                            "https://storage.googleapis.com/tagjs-prod.appspot.com/v1/jKLzvv3N3H/jzkyeakh_expires_30_days.png",
-                                            fit: BoxFit.fill,
-                                          ),
+                                        )
+                                      : const Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Icon(Icons.stop_circle_rounded,
+                                                color: Colors.white, size: 20),
+                                            SizedBox(width: 10),
+                                            Text(
+                                              "HENTIKAN PENYIRAMAN",
+                                              style: TextStyle(
+                                                color: AppColors.white,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      const Text(
-                                        "HENTIKAN PENYIRAMAN",
-                                        style: TextStyle(
-                                          color: AppColors.white,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
                                 ),
                               ),
                             ),
                             const SizedBox(height: 8),
 
-                            // Water Now Button
+                            // Siram Sekarang Button
                             Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                              ),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
                               child: InkWell(
-                                onTap: () {
-                                  debugPrint('Water now');
-                                },
-                                child: Container(
+                                onTap: _loading
+                                    ? null
+                                    : () => _controlPump(on: true),
+                                borderRadius: BorderRadius.circular(24),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(24),
-                                    color: const Color(0xFF19E66F),
-                                    boxShadow: const [
+                                    color: !_pumpOn
+                                        ? const Color(0xFF19E66F)
+                                        : const Color(0xFF19E66F)
+                                            .withValues(alpha: 0.5),
+                                    boxShadow: [
                                       BoxShadow(
-                                        color: AppColors.shadow,
+                                        color: const Color(0xFF19E66F)
+                                            .withValues(alpha: 0.3),
                                         blurRadius: 12,
-                                        offset: Offset(0, 4),
+                                        offset: const Offset(0, 4),
                                       ),
                                     ],
                                   ),
                                   padding: const EdgeInsets.symmetric(
-                                    vertical: 17,
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      SizedBox(
-                                        width: 12,
-                                        height: 14,
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            24,
+                                      vertical: 17),
+                                  child: _loading
+                                      ? const Center(
+                                          child: SizedBox(
+                                            width: 22,
+                                            height: 22,
+                                            child: CircularProgressIndicator(
+                                              color: Colors.white,
+                                              strokeWidth: 2.5,
+                                            ),
                                           ),
-                                          child: Image.network(
-                                            "https://storage.googleapis.com/tagjs-prod.appspot.com/v1/jKLzvv3N3H/d32agqc2_expires_30_days.png",
-                                            fit: BoxFit.fill,
-                                          ),
+                                        )
+                                      : const Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Icon(Icons.water_drop_rounded,
+                                                color: Color(0xFF0F172A),
+                                                size: 20),
+                                            SizedBox(width: 8),
+                                            Text(
+                                              "SIRAM SEKARANG",
+                                              style: TextStyle(
+                                                color: Color(0xFF0F172A),
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      const Text(
-                                        "SIRAM SEKARANG",
-                                        style: TextStyle(
-                                          color: Color(0xFF0F172A),
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-
-                            // Schedule Button
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                              ),
-                              child: InkWell(
-                                onTap: () {
-                                  debugPrint('Schedule watering');
-                                },
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: const Color(0xFFCBD5E1),
-                                    ),
-                                    borderRadius: BorderRadius.circular(24),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 12,
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      SizedBox(
-                                        width: 13,
-                                        height: 14,
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            24,
-                                          ),
-                                          child: Image.network(
-                                            "https://storage.googleapis.com/tagjs-prod.appspot.com/v1/jKLzvv3N3H/gc43ob0w_expires_30_days.png",
-                                            fit: BoxFit.fill,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      const Text(
-                                        "Jadwalkan Penyiraman",
-                                        style: TextStyle(
-                                          color: Color(0xFF475569),
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
                                 ),
                               ),
                             ),
@@ -628,7 +695,7 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
 
                             // Bottom Navigation
                             CustomBottomNavigation(
-                              currentIndex: 1, // Mode tab
+                              currentIndex: 1,
                               onTap: (index) {
                                 debugPrint('Navigation tapped: $index');
                               },
@@ -648,8 +715,7 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
   }
 
   Widget _buildDurationButton(String label, double minutes) {
-    final isSelected = selectedDuration == minutes;
-
+    final isSelected = selectedDuration == minutes.toInt();
     return Expanded(
       child: InkWell(
         onTap: () {
@@ -659,9 +725,7 @@ class _ManualControlScreenState extends State<ManualControlScreen> {
         },
         child: Container(
           decoration: BoxDecoration(
-            border: isSelected
-                ? null
-                : Border.all(color: const Color(0xFFE2E8F0)),
+            border: isSelected ? null : Border.all(color: const Color(0xFFE2E8F0)),
             borderRadius: BorderRadius.circular(16),
             color: isSelected ? const Color(0xFF19E66F) : AppColors.white,
           ),
