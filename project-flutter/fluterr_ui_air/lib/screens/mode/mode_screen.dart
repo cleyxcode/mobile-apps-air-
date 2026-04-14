@@ -41,6 +41,8 @@ class _ModeScreenState extends State<ModeScreen>
   }
 
   Future<void> _loadCurrentStatus() async {
+    // Jangan timpa UI optimistik saat request kontrol/mode masih berjalan.
+    if (_loading) return;
     try {
       final data = await ServiceLocator.sensorRepo.getStatus();
       if (mounted) {
@@ -68,15 +70,17 @@ class _ModeScreenState extends State<ModeScreen>
         on: _pumpOn,
         mode: auto ? 'auto' : 'manual',
       );
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          if (!success) {
-            _isAuto = prevAuto;
-            _statusMsg = 'Gagal mengubah mode';
-            _isError = true;
-          }
-        });
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        if (!success) {
+          _isAuto = prevAuto;
+          _statusMsg = 'Gagal mengubah mode';
+          _isError = true;
+        }
+      });
+      if (success) {
+        await _loadCurrentStatus();
       }
     } catch (_) {
       if (mounted) {
@@ -108,15 +112,17 @@ class _ModeScreenState extends State<ModeScreen>
         on: _pumpOn,
         mode: 'manual',
       );
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          if (!success) {
-            _pumpOn = prevPump;
-            _statusMsg = 'Gagal mengontrol pompa';
-            _isError = true;
-          }
-        });
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        if (!success) {
+          _pumpOn = prevPump;
+          _statusMsg = 'Gagal mengontrol pompa';
+          _isError = true;
+        }
+      });
+      if (success) {
+        await _loadCurrentStatus();
       }
     } catch (_) {
       if (mounted) {

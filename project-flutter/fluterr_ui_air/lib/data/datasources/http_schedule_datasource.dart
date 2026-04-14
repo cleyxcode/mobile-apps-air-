@@ -14,7 +14,7 @@ class HttpScheduleDatasource implements ScheduleRepository {
     final response = await http
         .get(Uri.parse('$_baseUrl/schedules'))
         .timeout(_timeout);
-    if (response.statusCode == 200) {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
       final json = jsonDecode(response.body) as Map<String, dynamic>;
       final list = json['schedules'] as List<dynamic>;
       return list
@@ -33,7 +33,7 @@ class HttpScheduleDatasource implements ScheduleRepository {
           body: jsonEncode(s.toJson()),
         )
         .timeout(_timeout);
-    if (response.statusCode == 200) {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
       final json = jsonDecode(response.body) as Map<String, dynamic>;
       return WateringSchedule.fromJson(json['schedule'] as Map<String, dynamic>);
     }
@@ -49,7 +49,7 @@ class HttpScheduleDatasource implements ScheduleRepository {
           body: jsonEncode(data),
         )
         .timeout(_timeout);
-    return response.statusCode == 200;
+    return response.statusCode >= 200 && response.statusCode < 300;
   }
 
   @override
@@ -57,6 +57,6 @@ class HttpScheduleDatasource implements ScheduleRepository {
     final response = await http
         .delete(Uri.parse('$_baseUrl/schedules/$id'))
         .timeout(_timeout);
-    return response.statusCode == 200;
+    return response.statusCode >= 200 && response.statusCode < 300;
   }
 }

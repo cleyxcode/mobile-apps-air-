@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../constants/app_colors.dart';
-import '../../models/sensor_data.dart';
+import '../../core/schedule_foreground_service.dart';
 import '../../core/service_locator.dart';
+import '../../models/sensor_data.dart';
 
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
@@ -66,6 +67,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
     if (ok == true) {
       await ServiceLocator.scheduleRepo.deleteSchedule(s.id);
+      ScheduleForegroundService.instance.invalidateSchedule(s.id);
       _load();
     }
   }
@@ -467,9 +469,9 @@ class _ScheduleFormState extends State<_ScheduleForm> {
       final s = WateringSchedule(
         id: widget.existing?.id ?? '',
         name: _nameCtrl.text.trim(),
-        time: _timeStr,
+        time: WateringSchedule.normalizeTimeToHHmm(_timeStr),
         durationMinutes: _duration,
-        days: _selectedDays,
+        days: WateringSchedule.normalizeDays(_selectedDays),
         enabled: _enabled,
       );
 

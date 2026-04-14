@@ -6,12 +6,14 @@ class AIPredictionCard extends StatelessWidget {
   final SensorData? data;
   final VoidCallback? onWaterNow;
   final double? modelAccuracy;
+  final bool isPumpBusy;
 
   const AIPredictionCard({
     super.key,
     this.data,
     this.onWaterNow,
     this.modelAccuracy,
+    this.isPumpBusy = false,
   });
 
   @override
@@ -298,48 +300,69 @@ class AIPredictionCard extends StatelessWidget {
   }
 
   Widget _buildManualButton(bool pumpOn) {
-    return GestureDetector(
-      onTap: onWaterNow,
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          gradient: LinearGradient(
-            colors: pumpOn
-                ? [const Color(0xFFEF4444), const Color(0xFFDC2626)]
-                : [AppColors.primary, AppColors.primaryDark],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: (pumpOn ? AppColors.error : AppColors.primary)
-                  .withValues(alpha: 0.35),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
+    final busy = isPumpBusy || onWaterNow == null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: busy ? null : onWaterNow,
+        borderRadius: BorderRadius.circular(18),
+        splashColor: Colors.white.withValues(alpha: 0.2),
+        highlightColor: Colors.white.withValues(alpha: 0.08),
+        child: Ink(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              colors: pumpOn
+                  ? [const Color(0xFFEF4444), const Color(0xFFDC2626)]
+                  : [AppColors.primary, AppColors.primaryDark],
             ),
-          ],
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              pumpOn
-                  ? Icons.stop_circle_rounded
-                  : Icons.water_drop_rounded,
-              color: Colors.white,
-              size: 22,
-            ),
-            const SizedBox(width: 10),
-            Text(
-              pumpOn ? 'MATIKAN POMPA' : 'SIRAM SEKARANG',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
+            boxShadow: [
+              BoxShadow(
+                color: (pumpOn ? AppColors.error : AppColors.primary)
+                    .withValues(alpha: 0.35),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
               ),
-            ),
-          ],
+            ],
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: busy
+              ? const SizedBox(
+                  height: 24,
+                  child: Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      pumpOn
+                          ? Icons.stop_circle_rounded
+                          : Icons.water_drop_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      pumpOn ? 'MATIKAN POMPA' : 'SIRAM SEKARANG',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
         ),
       ),
     );

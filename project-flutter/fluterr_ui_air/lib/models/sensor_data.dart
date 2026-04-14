@@ -23,6 +23,13 @@ class SensorData {
     required this.timestamp,
   });
 
+  /// Normalisasi `mode` dari API (hindari spasi / casing dari MySQL).
+  static String normalizeMode(dynamic raw) {
+    final s = (raw as String? ?? 'auto').trim().toLowerCase();
+    if (s == 'auto' || s == 'manual' || s == 'schedule') return s;
+    return 'auto';
+  }
+
   factory SensorData.fromStatusJson(Map<String, dynamic> json) {
     final latest = json['latest_data'] as Map<String, dynamic>? ?? {};
     return SensorData(
@@ -34,7 +41,7 @@ class SensorData {
       needsWatering : latest['needs_watering'] as bool? ?? false,
       description   : latest['description']  as String? ?? '',
       pumpStatus    : json['pump_status']     as bool? ?? false,
-      mode          : json['mode']            as String? ?? 'auto',
+      mode          : normalizeMode(json['mode']),
       timestamp     : latest['timestamp']     as String? ?? '',
     );
   }
@@ -78,6 +85,10 @@ class HistoryRecord {
   final double airHumidity;
   final String label;
   final bool pumpStatus;
+  /// Dari API `needs_watering` (klasifikasi KNN).
+  final bool needsWatering;
+  final double confidence;
+  final String mode;
 
   const HistoryRecord({
     required this.timestamp,
@@ -86,16 +97,28 @@ class HistoryRecord {
     required this.airHumidity,
     required this.label,
     required this.pumpStatus,
+    this.needsWatering = false,
+    this.confidence = 0,
+    this.mode = 'auto',
   });
+
+  static String _timestampToString(dynamic v) {
+    if (v == null) return '';
+    if (v is String) return v;
+    return v.toString();
+  }
 
   factory HistoryRecord.fromJson(Map<String, dynamic> json) {
     return HistoryRecord(
-      timestamp    : json['timestamp']     as String? ?? '',
+      timestamp    : _timestampToString(json['timestamp']),
       soilMoisture : (json['soil_moisture'] as num?)?.toDouble() ?? 0,
       temperature  : (json['temperature']   as num?)?.toDouble() ?? 0,
       airHumidity  : (json['air_humidity']  as num?)?.toDouble() ?? 0,
       label        : json['label']          as String? ?? '---',
       pumpStatus   : json['pump_status']    as bool? ?? false,
+      needsWatering: json['needs_watering'] as bool? ?? false,
+      confidence   : (json['confidence']   as num?)?.toDouble() ?? 0,
+      mode         : json['mode']           as String? ?? 'auto',
     );
   }
 }
@@ -120,13 +143,47 @@ class WateringSchedule {
     this.lastTriggered,
   });
 
+  /// Samakan format API/MySQL (`08:00:00`, `8:05`) ke `HH:mm` untuk perbandingan jam lokal.
+  static String normalizeTimeToHHmm(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return '00:00';
+    final parts = raw.trim().split(':');
+    if (parts.isEmpty) return '00:00';
+    final h = int.tryParse(parts[0].trim()) ?? 0;
+    final mRaw = parts.length > 1 ? parts[1].trim() : '0';
+    final mDigits = RegExp(r'^\d+').stringMatch(mRaw) ?? '0';
+    final m = int.tryParse(mDigits) ?? 0;
+    return '${h.clamp(0, 23).toString().padLeft(2, '0')}:${m.clamp(0, 59).toString().padLeft(2, '0')}';
+  }
+
+  static List<String> normalizeDays(Iterable<dynamic>? raw) {
+    if (raw == null) return [];
+    return raw
+        .map((e) => e.toString().trim().toLowerCase())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  /// `DateTime.weekday`: 1 = Senin … 7 = Minggu
+  static String weekdayKey(int weekday) {
+    const map = {
+      1: 'senin',
+      2: 'selasa',
+      3: 'rabu',
+      4: 'kamis',
+      5: 'jumat',
+      6: 'sabtu',
+      7: 'minggu',
+    };
+    return map[weekday] ?? 'senin';
+  }
+
   factory WateringSchedule.fromJson(Map<String, dynamic> json) {
     return WateringSchedule(
       id              : json['id']               as String? ?? '',
       name            : json['name']             as String? ?? '',
-      time            : json['time']             as String? ?? '00:00',
+      time            : normalizeTimeToHHmm(json['time']?.toString()),
       durationMinutes : (json['duration_minutes'] as num?)?.toInt() ?? 5,
-      days            : List<String>.from(json['days'] as List? ?? []),
+      days            : normalizeDays(json['days'] as List?),
       enabled         : json['enabled']          as bool? ?? true,
       lastTriggered   : json['last_triggered']   as String?,
     );

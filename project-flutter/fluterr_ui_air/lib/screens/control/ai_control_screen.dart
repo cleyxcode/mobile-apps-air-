@@ -620,7 +620,7 @@ class _AIControlScreenState extends State<AIControlScreen> {
                               child: InkWell(
                                 onTap: () {
                                   setState(() => _initialLoading = true);
-                                  _fetchAndAutoWater();
+                                  _fetchStatus();
                                 },
                                 borderRadius: BorderRadius.circular(24),
                                 child: Container(

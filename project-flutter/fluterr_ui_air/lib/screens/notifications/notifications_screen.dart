@@ -16,7 +16,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     with AutomaticKeepAliveClientMixin {
   List<_NotifItem> _notifications = [];
   bool _isLoading = true;
+  String? _errorMsg;
   Timer? _refreshTimer;
+
+  /// Sama sumber data dengan Riwayat: `GET /history`, polling agar mendekati real-time.
+  static const Duration _pollInterval = Duration(seconds: 15);
 
   @override
   bool get wantKeepAlive => true;
@@ -24,11 +28,10 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   @override
   void initState() {
     super.initState();
-    _buildNotifications();
-    _refreshTimer = Timer.periodic(
-      const Duration(seconds: 60),
-      (_) => _buildNotifications(),
-    );
+    _loadNotifications(silent: false);
+    _refreshTimer = Timer.periodic(_pollInterval, (_) {
+      _loadNotifications(silent: true);
+    });
   }
 
   @override
@@ -37,20 +40,30 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     super.dispose();
   }
 
-  Future<void> _buildNotifications() async {
-    setState(() => _isLoading = true);
+  /// Bangun daftar notifikasi dari rekaman sensor terbaru (sama seperti backend `/history`).
+  Future<void> _loadNotifications({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMsg = null;
+      });
+    }
     try {
-      final records = await ServiceLocator.sensorRepo.getHistory(limit: 50);
+      final records = await ServiceLocator.sensorRepo.getHistory(limit: 80);
       final notifs = <_NotifItem>[];
 
       for (final r in records.reversed) {
-        if (r.label == 'Kering') {
+        final confSuffix = r.confidence > 0
+            ? ' Keyakinan KNN: ${r.confidence.toStringAsFixed(0)}%.'
+            : '';
+
+        if (r.needsWatering || r.label == 'Kering') {
           notifs.add(_NotifItem(
             icon: Icons.warning_amber_rounded,
             color: AppColors.warning,
             title: 'Tanah Kering Terdeteksi',
             body:
-                'Kelembaban ${r.soilMoisture.toStringAsFixed(1)}% — KNN merekomendasikan penyiraman',
+                'Kelembaban ${r.soilMoisture.toStringAsFixed(1)}% — sistem merekomendasikan penyiraman.$confSuffix',
             timestamp: r.timestamp,
             type: 'peringatan',
           ));
@@ -60,7 +73,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             color: AppColors.info,
             title: 'Penyiraman Aktif',
             body:
-                'Pompa dinyalakan. Kelembaban tanah: ${r.soilMoisture.toStringAsFixed(1)}%',
+                'Pompa menyala. Kelembaban tanah: ${r.soilMoisture.toStringAsFixed(1)}%. Mode: ${r.mode}.$confSuffix',
             timestamp: r.timestamp,
             type: 'info',
           ));
@@ -70,22 +83,38 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             color: AppColors.primary,
             title: 'Kondisi Optimal',
             body:
-                'Tanah dalam kondisi lembab optimal (${r.soilMoisture.toStringAsFixed(1)}%)',
+                'Tanah lembab optimal (${r.soilMoisture.toStringAsFixed(1)}%).$confSuffix',
             timestamp: r.timestamp,
             type: 'sukses',
           ));
+        } else if (r.label == 'Basah') {
+          notifs.add(_NotifItem(
+            icon: Icons.opacity_rounded,
+            color: AppColors.info,
+            title: 'Tanah Basah',
+            body:
+                'Kelembaban tinggi (${r.soilMoisture.toStringAsFixed(1)}%).$confSuffix',
+            timestamp: r.timestamp,
+            type: 'info',
+          ));
         }
-        if (notifs.length >= 20) break;
+        if (notifs.length >= 40) break;
       }
 
-      if (mounted) {
-        setState(() {
-          _notifications = notifs;
-          _isLoading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _notifications = notifs;
+        _isLoading = false;
+        _errorMsg = null;
+      });
     } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        if (_notifications.isEmpty || !silent) {
+          _errorMsg = 'Tidak dapat memuat notifikasi dari server';
+        }
+      });
     }
   }
 
@@ -113,14 +142,16 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           _buildHeader(),
           Expanded(
             child: RefreshIndicator(
-              onRefresh: _buildNotifications,
+              onRefresh: () => _loadNotifications(silent: true),
               color: AppColors.primary,
               backgroundColor: AppColors.white,
               child: _isLoading
                   ? _buildShimmerLoading()
-                  : _notifications.isEmpty
-                      ? _buildEmpty()
-                      : _buildList(),
+                  : _errorMsg != null && _notifications.isEmpty
+                      ? _buildError()
+                      : _notifications.isEmpty
+                          ? _buildEmpty()
+                          : _buildList(),
             ),
           ),
         ],
@@ -189,6 +220,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           ),
           if (_notifications.isNotEmpty)
             Container(
+              margin: const EdgeInsets.only(right: 8),
               padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
@@ -204,8 +236,63 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                 ),
               ),
             ),
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.primarySurface,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.refresh_rounded,
+                  color: AppColors.primary, size: 22),
+              onPressed: () =>
+                  _loadNotifications(silent: _notifications.isNotEmpty),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildError() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(24),
+      children: [
+        SizedBox(
+          height: MediaQuery.of(context).size.height * 0.25,
+        ),
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: AppColors.error.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(Icons.wifi_off_rounded,
+                    color: AppColors.error, size: 32),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _errorMsg ?? 'Terjadi kesalahan',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: AppColors.textMedium, fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () => _loadNotifications(silent: false),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Coba Lagi',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

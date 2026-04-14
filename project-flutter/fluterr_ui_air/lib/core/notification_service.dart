@@ -21,38 +21,49 @@ class NotificationService {
   Future<void> init() async {
     if (_initialized) return;
 
-    const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    // ✅ ANDROID
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
 
+    // ✅ IOS
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
 
+    // ✅ LINUX (FIX ERROR KAMU)
+    const linuxSettings = LinuxInitializationSettings(
+      defaultActionName: 'Open notification',
+    );
+
+    // ✅ GABUNG SEMUA PLATFORM
     const settings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
+      linux: linuxSettings,
     );
 
     await _plugin.initialize(
       settings: settings,
       onDidReceiveNotificationResponse: _onNotificationTap,
     );
-
-    // Request Android 13+ permission
+    // ✅ Android permission (Android 13+)
     if (Platform.isAndroid) {
-      final androidPlugin =
-          _plugin.resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>();
+      final androidPlugin = _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
       await androidPlugin?.requestNotificationsPermission();
     }
 
-    // Request iOS permission
+    // ✅ iOS permission
     if (Platform.isIOS) {
-      final iosPlugin =
-          _plugin.resolvePlatformSpecificImplementation<
-              IOSFlutterLocalNotificationsPlugin>();
+      final iosPlugin = _plugin
+          .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin
+          >();
       await iosPlugin?.requestPermissions(
         alert: true,
         badge: true,
@@ -64,7 +75,6 @@ class NotificationService {
   }
 
   void _onNotificationTap(NotificationResponse response) {
-    // Can handle navigation based on response.payload
     debugPrint('Notification tapped: ${response.payload}');
   }
 
@@ -78,7 +88,7 @@ class NotificationService {
   }) async {
     if (!_initialized) return;
 
-    // Deduplicate: skip if same key sent recently
+    // ✅ Anti spam (deduplicate)
     if (key != null && _lastNotifKey == key && _lastNotifTime != null) {
       if (DateTime.now().difference(_lastNotifTime!) < cooldown) return;
     }
@@ -86,6 +96,7 @@ class NotificationService {
     _lastNotifKey = key;
     _lastNotifTime = DateTime.now();
 
+    // ✅ Android detail
     final androidDetails = AndroidNotificationDetails(
       'siram_pintar_channel',
       'Siram Pintar',
@@ -99,15 +110,20 @@ class NotificationService {
       styleInformation: BigTextStyleInformation(body),
     );
 
+    // ✅ iOS detail
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
     );
 
+    // ✅ Linux detail (opsional tapi bagus ditambah)
+    const linuxDetails = LinuxNotificationDetails();
+
     final details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
+      linux: linuxDetails,
     );
 
     await _plugin.show(

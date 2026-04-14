@@ -10,16 +10,23 @@ import '../repositories/sensor_repository.dart';
 class HttpSensorDatasource implements SensorRepository {
   static const String _baseUrl = AppConfig.apiBaseUrl;
   static const Duration _timeout = Duration(seconds: 10);
-  static const Duration _controlTimeout = Duration(seconds: 5);
+  /// Ubah mode / pompa butuh waktu di jaringan lemah — hindari timeout palsu.
+  static const Duration _controlTimeout = Duration(seconds: 18);
 
   @override
   Future<SensorData> getStatus() async {
     final response = await http
         .get(Uri.parse('$_baseUrl/status'))
         .timeout(_timeout);
-    if (response.statusCode == 200) {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
       final json = jsonDecode(response.body) as Map<String, dynamic>;
       return SensorData.fromStatusJson(json);
+    }
+    if (response.statusCode >= 500) {
+      throw Exception(
+        'Server mengembalikan error ${response.statusCode} pada /status. '
+        'Periksa log backend (sering: koneksi database / env DB_HOST).',
+      );
     }
     throw Exception('Gagal memuat status: ${response.statusCode}');
   }
@@ -29,7 +36,7 @@ class HttpSensorDatasource implements SensorRepository {
     final response = await http
         .get(Uri.parse('$_baseUrl/history?limit=$limit'))
         .timeout(_timeout);
-    if (response.statusCode == 200) {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
       final json = jsonDecode(response.body) as Map<String, dynamic>;
       final records = json['records'] as List<dynamic>;
       return records
@@ -48,7 +55,7 @@ class HttpSensorDatasource implements SensorRepository {
           body: jsonEncode({'action': on ? 'on' : 'off', 'mode': mode}),
         )
         .timeout(_controlTimeout);
-    return response.statusCode == 200;
+    return response.statusCode >= 200 && response.statusCode < 300;
   }
 
   @override
@@ -56,7 +63,7 @@ class HttpSensorDatasource implements SensorRepository {
     final response = await http
         .get(Uri.parse('$_baseUrl/model-info'))
         .timeout(_timeout);
-    if (response.statusCode == 200) {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
       return jsonDecode(response.body) as Map<String, dynamic>;
     }
     throw Exception('Gagal memuat info model: ${response.statusCode}');

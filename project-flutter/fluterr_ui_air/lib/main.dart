@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'core/service_locator.dart';
 import 'core/notification_service.dart';
+import 'core/schedule_foreground_service.dart';
 import 'theme/app_theme.dart';
 import 'screens/splash/splash_screen.dart';
 import 'screens/app_shell.dart';
@@ -9,6 +10,7 @@ import 'screens/app_shell.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ServiceLocator.setup();
+  ScheduleForegroundService.instance.start();
   await NotificationService.instance.init();
 
   SystemChrome.setSystemUIOverlayStyle(

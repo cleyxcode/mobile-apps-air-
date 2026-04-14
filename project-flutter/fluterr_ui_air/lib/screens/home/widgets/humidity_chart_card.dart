@@ -8,6 +8,11 @@ class HumidityChartCard extends StatelessWidget {
 
   const HumidityChartCard({super.key, required this.history});
 
+  int get _chartPointCount {
+    if (history.isEmpty) return 0;
+    return history.length > 20 ? 20 : history.length;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -37,11 +42,11 @@ class HumidityChartCard extends StatelessWidget {
                     color: AppColors.primary, size: 20),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'Tren Kelembaban',
                       style: TextStyle(
                         color: AppColors.textDark,
@@ -50,8 +55,13 @@ class HumidityChartCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '20 data terakhir',
-                      style: TextStyle(color: AppColors.textLight, fontSize: 11),
+                      history.isEmpty
+                          ? 'Data dari server'
+                          : '$_chartPointCount titik terakhir · ${history.length} rekaman',
+                      style: const TextStyle(
+                        color: AppColors.textLight,
+                        fontSize: 11,
+                      ),
                     ),
                   ],
                 ),
@@ -139,6 +149,28 @@ class HumidityChartCard extends StatelessWidget {
 
     return LineChart(
       LineChartData(
+        lineTouchData: LineTouchData(
+          enabled: true,
+          handleBuiltInTouches: true,
+          touchTooltipData: LineTouchTooltipData(
+            fitInsideHorizontally: true,
+            fitInsideVertically: true,
+            getTooltipColor: (_) => const Color(0xFF1E293B),
+            getTooltipItems: (List<LineBarSpot> lineBarsSpot) {
+              return lineBarsSpot.map((spot) {
+                final label = spot.barIndex == 0 ? 'Tanah' : 'Udara';
+                return LineTooltipItem(
+                  '$label: ${spot.y.toStringAsFixed(0)}%',
+                  const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                );
+              }).toList();
+            },
+          ),
+        ),
         gridData: FlGridData(
           show: true,
           drawVerticalLine: false,

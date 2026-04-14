@@ -20,17 +20,19 @@ class _HistoryScreenState extends State<HistoryScreen>
   String? _errorMsg;
   Timer? _refreshTimer;
 
+  /// Interval polling ke `GET /history` (data terbaru dari server).
+  static const Duration _pollInterval = Duration(seconds: 15);
+
   @override
   bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _loadHistory();
-    _refreshTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => _loadHistory(),
-    );
+    _loadHistory(silent: false);
+    _refreshTimer = Timer.periodic(_pollInterval, (_) {
+      _loadHistory(silent: true);
+    });
   }
 
   @override
@@ -39,26 +41,31 @@ class _HistoryScreenState extends State<HistoryScreen>
     super.dispose();
   }
 
-  Future<void> _loadHistory() async {
-    setState(() {
-      _isLoading = true;
-      _errorMsg = null;
-    });
+  /// [silent]: true = pembaruan latar (tanpa shimmer penuh), mis. timer polling.
+  Future<void> _loadHistory({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMsg = null;
+      });
+    }
     try {
       final records = await ServiceLocator.sensorRepo.getHistory(limit: 100);
-      if (mounted) {
-        setState(() {
-          _records = records.reversed.toList();
-          _isLoading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        // API mengembalikan urutan kronologis naik; tampilkan terbaru di atas.
+        _records = records.reversed.toList();
+        _isLoading = false;
+        _errorMsg = null;
+      });
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        if (_records.isEmpty || !silent) {
           _errorMsg = 'Tidak dapat memuat riwayat';
-        });
-      }
+        }
+      });
     }
   }
 
@@ -124,7 +131,7 @@ class _HistoryScreenState extends State<HistoryScreen>
           _buildHeader(),
           Expanded(
             child: RefreshIndicator(
-              onRefresh: _loadHistory,
+              onRefresh: () => _loadHistory(silent: true),
               color: AppColors.primary,
               backgroundColor: AppColors.white,
               child: _isLoading
@@ -242,7 +249,7 @@ class _HistoryScreenState extends State<HistoryScreen>
             child: IconButton(
               icon: const Icon(Icons.refresh_rounded,
                   color: AppColors.primary, size: 22),
-              onPressed: _loadHistory,
+              onPressed: () => _loadHistory(silent: _records.isNotEmpty),
             ),
           ),
         ],
@@ -273,7 +280,7 @@ class _HistoryScreenState extends State<HistoryScreen>
                     color: AppColors.textMedium, fontSize: 14)),
             const SizedBox(height: 16),
             ElevatedButton.icon(
-              onPressed: _loadHistory,
+              onPressed: () => _loadHistory(silent: false),
               icon: const Icon(Icons.refresh_rounded, size: 18),
               label: const Text('Coba Lagi',
                   style: TextStyle(fontWeight: FontWeight.w600)),

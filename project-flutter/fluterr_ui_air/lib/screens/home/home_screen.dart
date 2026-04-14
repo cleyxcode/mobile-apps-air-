@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../constants/app_colors.dart';
 import '../../core/service_locator.dart';
@@ -28,6 +29,11 @@ class _HomeScreenState extends State<HomeScreen>
   String? _errorMsg;
   Timer? _refreshTimer;
   DateTime? _lastUpdated;
+  bool _pumpBusy = false;
+  bool _introAnimationDone = false;
+
+  /// Polling sensor + grafik (GET /status, /history).
+  static const Duration _livePollInterval = Duration(seconds: 10);
 
   // Track previous pump state for notification
   bool? _prevPumpStatus;
@@ -44,11 +50,10 @@ class _HomeScreenState extends State<HomeScreen>
       duration: const Duration(milliseconds: 1200),
       vsync: this,
     );
-    _loadAll();
-    _refreshTimer = Timer.periodic(
-      const Duration(seconds: 15),
-      (_) => _loadAll(),
-    );
+    _loadAll(silent: false);
+    _refreshTimer = Timer.periodic(_livePollInterval, (_) {
+      _loadAll(silent: true);
+    });
   }
 
   @override
@@ -58,18 +63,29 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  Future<void> _loadAll() async {
-    await Future.wait([_loadData(), _loadHistory(), _loadModelInfo()]);
-    if (mounted && !_isLoading) {
+  Future<void> _loadAll({bool silent = false}) async {
+    await Future.wait([
+      _loadData(silent: silent),
+      _loadHistory(),
+      _loadModelInfo(),
+    ]);
+    if (!mounted || _isLoading) return;
+    if (!_introAnimationDone) {
+      _introAnimationDone = true;
       _staggerController.forward(from: 0.0);
     }
   }
 
-  Future<void> _loadData() async {
+  Future<void> _loadData({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMsg = null;
+      });
+    }
     try {
       final data = await ServiceLocator.sensorRepo.getStatus();
       if (mounted) {
-        // Trigger notifications based on sensor data
         _handleNotifications(data);
 
         setState(() {
@@ -84,10 +100,14 @@ class _HomeScreenState extends State<HomeScreen>
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _isOnline = false;
-          _errorMsg = e.toString();
+          if (!silent || _sensorData == null) {
+            _isOnline = false;
+            _errorMsg = e.toString();
+          }
         });
-        NotificationService.instance.notifyOffline();
+        if (!silent) {
+          NotificationService.instance.notifyOffline();
+        }
       }
     }
   }
@@ -119,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _loadHistory() async {
     try {
-      final records = await ServiceLocator.sensorRepo.getHistory(limit: 30);
+      final records = await ServiceLocator.sensorRepo.getHistory(limit: 40);
       if (mounted) setState(() => _history = records);
     } catch (_) {}
   }
@@ -135,12 +155,36 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _togglePump() async {
-    final currentlyOn = _sensorData?.pumpStatus ?? false;
-    final success = await ServiceLocator.sensorRepo.controlPump(
-      on: !currentlyOn,
-      mode: 'manual',
-    );
-    if (success) _loadData();
+    if (_pumpBusy || _sensorData == null) return;
+    HapticFeedback.mediumImpact();
+    setState(() => _pumpBusy = true);
+    final currentlyOn = _sensorData!.pumpStatus;
+    try {
+      final success = await ServiceLocator.sensorRepo.controlPump(
+        on: !currentlyOn,
+        mode: 'manual',
+      );
+      if (!mounted) return;
+      if (success) {
+        await _loadData(silent: true);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Gagal mengontrol pompa. Coba lagi.'),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Gagal terhubung ke server.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _pumpBusy = false);
+    }
   }
 
   @override
@@ -152,11 +196,13 @@ class _HomeScreenState extends State<HomeScreen>
           HeaderSection(isOnline: _isOnline, lastUpdated: _lastUpdated),
           Expanded(
             child: RefreshIndicator(
-              onRefresh: _loadAll,
+              onRefresh: () => _loadAll(silent: true),
               color: AppColors.primary,
               backgroundColor: AppColors.white,
               displacement: 20,
-              child: _isLoading ? _buildShimmerLoading() : _buildContent(),
+              child: _isLoading && _sensorData == null
+                  ? _buildShimmerLoading()
+                  : _buildContent(),
             ),
           ),
         ],
@@ -265,6 +311,7 @@ class _HomeScreenState extends State<HomeScreen>
               data: _sensorData,
               modelAccuracy: _modelAccuracy,
               onWaterNow: _togglePump,
+              isPumpBusy: _pumpBusy,
             ),
           ),
           const SizedBox(height: 16),
@@ -312,7 +359,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ),
             GestureDetector(
-              onTap: _loadData,
+              onTap: () => _loadAll(silent: _sensorData != null),
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
